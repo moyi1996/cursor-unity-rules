@@ -9,7 +9,7 @@ alwaysApply: false
 
 ### Usage Rules
 
-```
+```csharp
 using UnityEngine;
 
 public class PerformanceExample : MonoBehaviour
@@ -53,82 +53,60 @@ public class PerformanceExample : MonoBehaviour
 }
 ```
 
-## Object Pooling (UnityEngine.Pool)
+## Object Pooling (TEngine ObjectPoolModule)
 
-**Unity 6.2 Note:** Do not write custom Queue-based pools. Use the native `UnityEngine.Pool` API.
+**TEngine Note:** Use `ObjectPoolModule` from TEngine framework instead of custom pools.
 
-```
+```csharp
+using TEngine;
 using UnityEngine;
-using UnityEngine.Pool;
 
 public class BulletManager : MonoBehaviour
 {
     [SerializeField] private Bullet _bulletPrefab;
     
-    // Native Unity Pool interface
-    private IObjectPool<Bullet> _bulletPool;
+    private IObjectPoolModule _objectPoolModule;
     
     private void Awake()
     {
-        // Initialize the pool
-        _bulletPool = new ObjectPool<Bullet>(
-            createFunc: CreateBullet,
-            actionOnGet: OnGetBullet,
-            actionOnRelease: OnReleaseBullet,
-            actionOnDestroy: OnDestroyBullet,
-            collectionCheck: true, // Checks for double-return errors (debug only)
-            defaultCapacity: 50,
-            maxSize: 100
-        );
+        // Get ObjectPoolModule from framework
+        _objectPoolModule = ModuleSystem.GetModule<IObjectPoolModule>();
     }
-
-    private Bullet CreateBullet()
-    {
-        Bullet bullet = Instantiate(_bulletPrefab, transform);
-        bullet.SetPool(_bulletPool); // Inject pool reference into the bullet
-        return bullet;
-    }
-
-    private void OnGetBullet(Bullet bullet) => bullet.gameObject.SetActive(true);
-    private void OnReleaseBullet(Bullet bullet) => bullet.gameObject.SetActive(false);
-    private void OnDestroyBullet(Bullet bullet) => Destroy(bullet.gameObject);
     
     public void FireBullet(Vector3 position, Vector3 direction)
     {
-        Bullet bullet = _bulletPool.Get();
+        // Spawn from pool
+        var bullet = _objectPoolModule.Spawn(_bulletPrefab.name, _bulletPrefab.gameObject);
         bullet.transform.position = position;
-        bullet.Fire(direction);
+        bullet.GetComponent<Bullet>().Fire(direction);
     }
 }
 
 public class Bullet : MonoBehaviour
 {
-    private IObjectPool<Bullet> _pool;
-
-    public void SetPool(IObjectPool<Bullet> pool) => _pool = pool;
-
-    public void Fire(Vector3 direction) { /* Physics logic */ }
-
-    private void DisableSelf()
+    private void OnDisable()
     {
         // ✅ DO: Return to pool instead of Destroy()
-        _pool.Release(this);
+        var objectPoolModule = ModuleSystem.GetModule<IObjectPoolModule>();
+        objectPoolModule.Unspawn(gameObject);
     }
+    
+    public void Fire(Vector3 direction) { /* Physics logic */ }
 }
 ```
 
-## Addressables (NOT Resources)
+## Resource Management (YooAsset - NOT Resources)
 
-**Unity 6.2 Note:** Use `Awaitable` instead of `System.Threading.Tasks`.
+**TEngine Note:** Use YooAsset via `IResourceModule` or `GameModule.Resource`. Never use `Resources.Load()`.
 
-```
+```csharp
+using Cysharp.Threading.Tasks;
+using TEngine;
 using UnityEngine;
-using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
 
 public class AssetLoader : MonoBehaviour
 {
-    // ❌ DON'T: Resources.Load (Synchronous, increases memory footprint)
+    // ❌ DON'T: Resources.Load (FORBIDDEN in TEngine)
     /*
     private void BadLoad()
     {
@@ -136,50 +114,50 @@ public class AssetLoader : MonoBehaviour
     }
     */
     
-    private AsyncOperationHandle<GameObject> _handle;
+    private AssetHandle _handle;
     private GameObject _loadedInstance;
 
-    // ✅ DO: Addressables with Awaitable (Unity 6)
-    public async Awaitable LoadEnemyAsync()
+    // ✅ DO: YooAsset with UniTask (TEngine)
+    public async UniTaskVoid LoadEnemyAsync()
     {
-        // Avoid loading if already loaded
-        if (_handle.IsValid()) return;
-
-        _handle = Addressables.LoadAssetAsync<GameObject>("Enemy");
+        // Load via GameModule (hot update domain) or ModuleSystem (main domain)
+        _handle = await GameModule.Resource.LoadAssetAsync<GameObject>("Enemy");
         
-        try 
+        if (_handle != null && _handle.AssetObject != null)
         {
-            await _handle.Task; // Native await integration
-
-            if (_handle.Status == AsyncOperationStatus.Succeeded)
-            {
-                GameObject prefab = _handle.Result;
-                _loadedInstance = Instantiate(prefab);
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"Failed to load asset: {e.Message}");
+            GameObject prefab = _handle.AssetObject as GameObject;
+            _loadedInstance = Instantiate(prefab);
         }
     }
     
-    // ✅ DO: Correct Memory Release
+    // ✅ DO: Sync loading (use sparingly)
+    public void LoadEnemySync()
+    {
+        _handle = GameModule.Resource.LoadAssetSync<GameObject>("Enemy");
+        if (_handle != null && _handle.AssetObject != null)
+        {
+            GameObject prefab = _handle.AssetObject as GameObject;
+            _loadedInstance = Instantiate(prefab);
+        }
+    }
+    
+    // ✅ DO: Correct Memory Release (framework manages automatically, but you can release manually)
     private void OnDestroy()
     {
-        if (_loadedInstance != null) Destroy(_loadedInstance);
-
-        if (_handle.IsValid())
+        if (_loadedInstance != null)
         {
-            // Crucial: Release the handle to free memory
-            Addressables.Release(_handle);
+            Destroy(_loadedInstance);
         }
+
+        // Framework manages handles automatically, but you can release manually if needed
+        // _handle?.Release();
     }
 }
 ```
 
 ## Memory Management (Zero Allocations)
 
-```
+```csharp
 using UnityEngine;
 using System.Collections.Generic;
 using TMPro;
@@ -219,3 +197,91 @@ public class UiOptimization : MonoBehaviour
     }
 }
 ```
+
+## Async Programming (UniTask)
+
+**TEngine Note:** Use UniTask instead of Coroutines for async operations.
+
+```csharp
+using Cysharp.Threading.Tasks;
+using TEngine;
+
+public class AsyncExample : MonoBehaviour
+{
+    // ❌ DON'T: Coroutines
+    /*
+    private IEnumerator LoadDataCoroutine()
+    {
+        yield return new WaitForSeconds(1f);
+        // ...
+    }
+    */
+    
+    // ✅ DO: UniTask
+    private async UniTaskVoid LoadDataAsync()
+    {
+        await UniTask.Delay(1000);
+        
+        // Load asset asynchronously
+        var handle = await GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+        // Use handle...
+    }
+    
+    private void Start()
+    {
+        // Fire and forget
+        LoadDataAsync().Forget();
+    }
+}
+```
+
+## Memory Pool (TEngine MemoryPool)
+
+**TEngine Note:** Use TEngine's MemoryPool for temporary allocations.
+
+```csharp
+using TEngine;
+
+public class MemoryPoolExample
+{
+    public void ProcessData()
+    {
+        // ✅ DO: Use MemoryPool for temporary allocations
+        var tempList = MemoryPool.Acquire<List<int>>();
+        try
+        {
+            // Use tempList...
+            tempList.Add(1);
+            tempList.Add(2);
+        }
+        finally
+        {
+            // ✅ DO: Always release
+            MemoryPool.Release(tempList);
+        }
+    }
+}
+```
+
+## Performance Best Practices
+
+### ✅ DO
+
+- Cache components in `Awake()` or `Start()`
+- Use `ObjectPoolModule` for frequently instantiated objects
+- Use YooAsset (via `GameModule.Resource`) for all resource loading
+- Use UniTask instead of Coroutines
+- Pre-allocate collections with initial capacity
+- Use `MemoryPool` for temporary allocations
+- Use `StringBuilder` for string concatenation in loops
+- Release object pool objects instead of `Destroy()`
+
+### ❌ DON'T
+
+- Don't use `Resources.Load()` - use YooAsset
+- Don't call `GetComponent()` in Update loops
+- Don't allocate new collections in Update
+- Don't use Coroutines - use UniTask
+- Don't forget to release pooled objects
+- Don't use `FindObjectOfType()` in Update
+- Don't create strings in Update loops

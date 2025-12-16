@@ -1,3 +1,251 @@
 ---
 alwaysApply: true
 ---
+
+# TEngine Framework Architecture
+
+## Overview
+
+This project uses **TEngine Framework** - a modular Unity framework with hot-update support. The architecture follows a layered approach with clear separation between framework core, main domain, and hot-update domain.
+
+## Architecture Layers
+
+```
+┌─────────────────────────────────────────┐
+│   Hot Update Domain (HotFix/)          │
+│   - GameLogic/ (Game Logic)            │
+│   - GameProto/ (Config Protocol)       │
+│   - Access via GameModule              │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│   Main Domain (GameScripts/)            │
+│   - GameEntry.cs (Entry Point)         │
+│   - Procedure/ (FSM State Machine)      │
+│   - Access via ModuleSystem             │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│   Framework Core (TEngine/)            │
+│   - Module System                       │
+│   - ResourceModule (YooAsset)          │
+│   - ProcedureModule (FSM)               │
+│   - AudioModule                         │
+│   - LocalizationModule                  │
+│   - ObjectPoolModule                    │
+│   - TimerModule                         │
+│   - SceneModule                         │
+│   - DebuggerModule                      │
+└─────────────────────────────────────────┘
+```
+
+## Module System
+
+### Framework Modules (Main Domain)
+
+Access framework modules via `ModuleSystem.GetModule<T>()`:
+
+```csharp
+// In main domain (Procedure, GameEntry, etc.)
+var resourceModule = ModuleSystem.GetModule<IResourceModule>();
+var audioModule = ModuleSystem.GetModule<IAudioModule>();
+var procedureModule = ModuleSystem.GetModule<IProcedureModule>();
+```
+
+### Game Modules (Hot Update Domain)
+
+Access game modules via `GameModule` static class:
+
+```csharp
+// In hot update domain (GameLogic)
+GameModule.UI.ShowUIAsync<LoginUI>();
+GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+GameModule.Audio.PlaySound("Click");
+GameModule.Scene.LoadSceneAsync("Battle");
+```
+
+## Procedure System (FSM)
+
+The Procedure system manages game state flow using a Finite State Machine pattern.
+
+### Procedure Flow
+
+```
+Launch → Splash → InitPackage → InitResources → LoadAssembly → StartGame
+```
+
+### Creating a Procedure
+
+```csharp
+namespace Procedure
+{
+    public class ProcedureLaunch : ProcedureBase
+    {
+        public override bool UseNativeDialog => true;
+        
+        private IAudioModule _audioModule;
+
+        protected override void OnInit(IFsm<IProcedureModule> procedureOwner)
+        {
+            _audioModule = ModuleSystem.GetModule<IAudioModule>();
+            base.OnInit(procedureOwner);
+        }
+
+        protected override void OnEnter(IFsm<IProcedureModule> procedureOwner)
+        {
+            base.OnEnter(procedureOwner);
+            // Initialization logic
+        }
+
+        protected override void OnUpdate(IFsm<IProcedureModule> procedureOwner, float elapseSeconds, float realElapseSeconds)
+        {
+            base.OnUpdate(procedureOwner, elapseSeconds, realElapseSeconds);
+            
+            // State transition
+            ChangeState<ProcedureSplash>(procedureOwner);
+        }
+
+        protected override void OnExit(IFsm<IProcedureModule> procedureOwner, bool isShutdown)
+        {
+            base.OnExit(procedureOwner, isShutdown);
+            // Cleanup logic
+        }
+    }
+}
+```
+
+## Hot Update Architecture (HybridCLR)
+
+### Domain Separation
+
+- **Main Domain**: `GameScripts/` - Core framework and procedures
+- **Hot Update Domain**: `HotFix/GameLogic/` - Game logic that can be hot-updated
+
+### Entry Point
+
+```csharp
+// Hot update entry point (called after assembly loaded)
+public partial class GameApp
+{
+    public static void Entrance(object[] objects)
+    {
+        GameEventHelper.Init();
+        _hotfixAssembly = (List<Assembly>)objects[0];
+        StartGameLogic();
+    }
+    
+    private static void StartGameLogic()
+    {
+        // Start game logic
+        GameModule.UI.ShowUIAsync<BattleMainUI>();
+    }
+}
+```
+
+### Hot Update Code Placement
+
+- ✅ **DO**: Place hot update code in `HotFix/GameLogic/` assembly
+- ✅ **DO**: Access framework via `GameModule` static class
+- ❌ **DON'T**: Put hot update code in main domain
+- ❌ **DON'T**: Access modules directly - use `GameModule`
+
+## Resource Management (YooAsset)
+
+### Loading Resources
+
+```csharp
+// Async loading (preferred)
+var handle = await GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+GameObject player = handle.AssetObject as GameObject;
+
+// Sync loading (use sparingly)
+var handle = GameModule.Resource.LoadAssetSync<GameObject>("Player");
+```
+
+### Resource Rules
+
+- ✅ **DO**: Use YooAsset for all resource loading
+- ✅ **DO**: Use `LoadAssetAsync` for async loading (preferred)
+- ✅ **DO**: Use `LoadAssetSync` for sync loading (use sparingly)
+- ❌ **DON'T**: Use `Resources.Load()` - forbidden
+- ❌ **DON'T**: Forget to release handles (framework manages automatically)
+
+**Note:** `LoadGameObject` is used internally by UIModule for UI prefabs. For general resource loading, use `LoadAssetAsync` or `LoadAssetSync`.
+
+## Event System
+
+### GameEvent Pattern
+
+TEngine supports two event patterns. Use `GameEvent.AddEventListener` and `GameEvent.Send` for general game events.
+
+```csharp
+// Define event constants
+public static class ActorEventDefine
+{
+    public const int PlayerDead = 1001;
+    public const int EnemyDead = 1002;
+    public const int ScoreChange = 1003;
+    public const int GameOver = 1004;
+}
+
+// Register event listener
+GameEvent.AddEventListener<Vector3, Quaternion>(ActorEventDefine.PlayerDead, OnPlayerDead);
+
+// Send event
+GameEvent.Send(ActorEventDefine.PlayerDead, position, rotation);
+
+// Remove event listener
+GameEvent.RemoveEventListener<Vector3, Quaternion>(ActorEventDefine.PlayerDead, OnPlayerDead);
+
+// Event handler
+private void OnPlayerDead(Vector3 position, Quaternion rotation)
+{
+    // Handle player death
+}
+```
+
+### Event Interface Pattern (Alternative - for UI)
+
+```csharp
+// Define event interface
+public interface ILoginUI : IEvent
+{
+    void ShowLoginUI();
+}
+
+// Implement in UI class
+public class LoginUI : UIWindow, ILoginUI
+{
+    public void ShowLoginUI()
+    {
+        GameModule.UI.ShowUIAsync<LoginUI>();
+    }
+}
+
+// Access event
+GameEvent.Get<ILoginUI>().ShowLoginUI();
+```
+
+## Best Practices
+
+### Module Access
+
+- **Main Domain**: Use `ModuleSystem.GetModule<T>()`
+- **Hot Update Domain**: Use `GameModule.X` static properties
+
+### State Management
+
+- Use **Procedure** system for game state flow
+- Don't bypass Procedure system for state management
+
+### Hot Update
+
+- Keep hot update code in `HotFix/GameLogic/` assembly
+- Access framework via `GameModule` only
+- Test hot update flow: Launch → LoadAssembly → GameApp.Entrance() → StartGameLogic()
+
+### Resource Loading
+
+- Always use YooAsset (never Resources.Load)
+- Prefer async loading
+- Framework manages resource references automatically

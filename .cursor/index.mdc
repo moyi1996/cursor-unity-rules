@@ -2,46 +2,392 @@
 alwaysApply: true
 ---
 
-# Unity 6.2 Project Rules
+# Unity 2022.3 Project Rules - TEngine Framework
 
 ## Project Overview
 
-This project uses Unity 6.2 (LTS 2025) with modern systems and architectural approaches.
+This project uses **TEngine Framework** - a modular Unity framework solution with hot-update support, built on Unity 2022.3 LTS.
 
 ## Tech Stack
 
-- **Unity Version**: 6.2 LTS (2025)
-- **C# Version**: 12.0
+- **Unity Version**: 2022.3 LTS
+- **C# Version**: 9.0
+- **Framework**: TEngine (Modular Architecture)
 - **Rendering Pipeline**: URP (Universal Render Pipeline)
-- **Input System**: New Input System (InputSystem package)
-- **UI Framework**: UI Toolkit (not UGUI)
-- **Asset Management**: Addressables
-- **Multiplayer**: Netcode for GameObjects
+- **Input System**: New Input System (InputSystem package) + Input Manager
+- **UI Framework**: UGUI (runtime) + UI Toolkit (editor tools)
+- **Asset Management**: YooAsset (replaces Resources)
+- **Hot Update**: HybridCLR (full-platform native C# hot update)
+- **Async Programming**: UniTask (replaces Coroutines)
+- **Localization**: I2Localization
 - **Testing**: Unity Test Framework
+
+## Project Architecture
+
+### Layer Structure
+
+```
+┌─────────────────────────────────────┐
+│   GameScripts (Main Domain)         │
+│   - GameEntry.cs (Entry Point)     │
+│   - Procedure/ (FSM State Machine) │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│   TEngine (Framework Core)          │
+│   - Module System                   │
+│   - ResourceModule (YooAsset)       │
+│   - ProcedureModule (FSM)           │
+│   - AudioModule                     │
+│   - LocalizationModule              │
+│   - ObjectPoolModule                │
+│   - TimerModule                     │
+│   - SceneModule                     │
+│   - DebuggerModule                  │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│   HotFix (Hot Update Domain)        │
+│   - GameLogic/                      │
+│     ├── GameApp.cs (Hot Entry)     │
+│     ├── GameModule.cs              │
+│     ├── Module/UIModule/          │
+│     └── UI/                        │
+│   - GameProto/ (Config Protocol)   │
+└─────────────────────────────────────┘
+```
+
+### Assembly Organization
+
+- **TEngine.Runtime.asmdef**: Framework runtime core
+- **TEngine.Editor.asmdef**: Framework editor tools
+- **Launcher.asmdef**: Launcher UI (pre-hot-update)
+- **GameLogic.asmdef**: Hot update game logic
+- **GameProto.asmdef**: Hot update config/protocol
+
+### Directory Structure
+
+```
+Assets/
+├── TEngine/                    # Framework core
+│   ├── Runtime/                # Runtime modules
+│   │   ├── Core/              # Core utilities
+│   │   └── Module/            # Framework modules
+│   └── Editor/                # Editor tools
+├── GameScripts/               # Main domain scripts
+│   ├── GameEntry.cs          # Game entry point
+│   ├── Procedure/            # FSM state procedures
+│   └── HotFix/               # Hot update domain
+│       ├── GameLogic/        # Game logic (hot update)
+│       └── GameProto/        # Config protocol (hot update)
+├── Launcher/                  # Launcher UI (pre-hot-update)
+├── AssetRaw/                  # Hot update resources
+│   ├── UI/                   # UI prefabs
+│   ├── Actor/                # Character prefabs
+│   ├── Effects/              # VFX prefabs
+│   └── ...
+├── AssetArt/                  # Art assets (atlas, etc.)
+├── Editor/                    # Editor scripts
+└── Scenes/                    # Scene files
+```
 
 ## Architectural Principles
 
-### 1. Modularity
-- Each system must be independent
-- Use ScriptableObject Architecture for configuration
-- Use dependency injection to wire up components
+### 1. Module System (TEngine Core)
 
-### 2. Performance
-- Object pooling for frequently instantiated objects
-- Addressables instead of Resources
-- ECS/DOTS for performance-critical systems
-- Burst Compiler where applicable
+- **Module Pattern**: All systems are modules implementing `IModule` interface
+- **Module Access**: Use `ModuleSystem.GetModule<T>()` or `GameModule.X` (hot update domain)
+- **Module Lifecycle**: OnInit → OnUpdate → OnDestroy
 
-### 3. Maintainability
-- Strict naming conventions
-- XML documentation for public APIs
-- Unit tests for business logic
-- Prefabs for reusable objects
+```csharp
+// Framework module access
+var resourceModule = ModuleSystem.GetModule<IResourceModule>();
 
-### 4. Code Style
-- Follow the Unity C# Style Guide
-- Use modern C# features (pattern matching, records, init-only properties)
-- async/await instead of coroutines where possible
+// Hot update domain module access
+GameModule.UI.ShowUIAsync<LoginUI>();
+GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+```
+
+### 2. Procedure System (FSM State Machine)
+
+- **State Management**: Use Procedure classes inheriting `ProcedureBase`
+- **State Flow**: Launch → Splash → InitPackage → InitResources → LoadAssembly → StartGame
+- **State Transition**: Use `ChangeState<T>()` method
+
+```csharp
+namespace Procedure
+{
+    public class ProcedureLaunch : ProcedureBase
+    {
+        protected override void OnEnter(IFsm<IProcedureModule> procedureOwner)
+        {
+            base.OnEnter(procedureOwner);
+            // Initialization logic
+            ChangeState<ProcedureSplash>(procedureOwner);
+        }
+    }
+}
+```
+
+### 3. Hot Update Architecture (HybridCLR)
+
+- **Domain Separation**: Main domain (GameScripts) and Hot update domain (HotFix)
+- **Entry Point**: `GameApp.Entrance()` is called after hot update assembly loaded
+- **Hot Update Code**: All game logic in `HotFix/GameLogic/` assembly
+- **Config Protocol**: `HotFix/GameProto/` for Luban config tables
+
+```csharp
+// Hot update entry point
+public partial class GameApp
+{
+    public static void Entrance(object[] objects)
+    {
+        GameEventHelper.Init();
+        StartGameLogic();
+    }
+    
+    private static void StartGameLogic()
+    {
+        GameModule.UI.ShowUIAsync<BattleMainUI>();
+    }
+}
+```
+
+### 4. Resource Management (YooAsset)
+
+- **Never Use**: `Resources.Load()` - Use YooAsset instead
+- **Resource Loading**: Use `IResourceModule` or `GameModule.Resource`
+- **Asset Reference**: Framework manages asset references automatically
+- **Memory Management**: LRU/ARC algorithms for automatic resource release
+
+```csharp
+// Load asset async (preferred)
+var handle = await GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+GameObject player = handle.AssetObject as GameObject;
+Instantiate(player, transform);
+
+// Load asset sync (use sparingly)
+var handle = GameModule.Resource.LoadAssetSync<GameObject>("Player");
+GameObject prefab = handle.AssetObject as GameObject;
+Instantiate(prefab, transform);
+
+// Load non-GameObject assets
+var handle = await GameModule.Resource.LoadAssetAsync<Texture2D>("texture_name");
+Texture2D texture = handle.AssetObject as Texture2D;
+```
+
+### 5. UI System (UIModule)
+
+- **UI Types**: `UIWindow` (fullscreen/popup) and `UIWidget` (reusable components)
+- **UI Base**: All UI classes inherit from `UIBase`
+- **UI Lifecycle**: OnCreate → OnShow → RegisterEvent → OnRefresh → OnUpdate → OnHide → OnDestroy
+- **UI Access**: Use `GameModule.UI` in hot update domain
+
+```csharp
+namespace GameLogic
+{
+    [Window(UILayer.UI)]
+    public class LoginUI : UIWindow
+    {
+        private Button _btnLogin;
+        
+        protected override void ScriptGenerator()
+        {
+            _btnLogin = FindChildComponent<Button>("m_btnLogin");
+        }
+        
+        protected override void OnCreate()
+        {
+            // UI initialization
+        }
+        
+        protected override void RegisterEvent()
+        {
+            // Register event listeners
+            AddUIEvent<int>(ActorEventDefine.ScoreChange, OnScoreChange);
+        }
+        
+        protected override void OnRefresh()
+        {
+            // Reset UI state when shown
+            m_textScore.text = "Score : 0";
+        }
+    }
+}
+
+// Show UI
+GameModule.UI.ShowUIAsync<LoginUI>();
+
+// Close UI
+GameModule.UI.CloseUI<LoginUI>();
+```
+
+### 6. Event System
+
+- **GameEvent Pattern**: Use `GameEvent.AddEventListener` and `GameEvent.Send` for general game events
+- **Event Interface Pattern**: Use `GameEvent.Get<T>()` with `IEvent` interfaces for type-safe UI events
+- **UI Events**: Use `AddUIEvent` in `RegisterEvent()` method for UI event handling
+
+```csharp
+// Define event constants
+public static class ActorEventDefine
+{
+    public const int PlayerDead = 1001;
+    public const int ScoreChange = 1002;
+}
+
+// Register event listener
+GameEvent.AddEventListener<Vector3, Quaternion>(ActorEventDefine.PlayerDead, OnPlayerDead);
+
+// Send event
+GameEvent.Send(ActorEventDefine.PlayerDead, position, rotation);
+
+// In UI class - Register UI events
+protected override void RegisterEvent()
+{
+    AddUIEvent<int>(ActorEventDefine.ScoreChange, OnScoreChange);
+    AddUIEvent(ActorEventDefine.GameOver, OnGameOver);
+}
+```
+
+### 7. Async Programming (UniTask)
+
+- **Prefer UniTask**: Use `UniTask`/`UniTask<T>` instead of Coroutines
+- **Async Methods**: Use `async UniTask` or `async UniTaskVoid`
+- **Awaitable**: Use `await` for async operations
+
+```csharp
+private async UniTaskVoid LoadDataAsync()
+{
+    await UniTask.Yield();
+    var handle = await GameModule.Resource.LoadAssetAsync<GameObject>("Player");
+    // Use handle...
+}
+
+// Call async method
+LoadDataAsync().Forget(); // Fire and forget
+```
+
+## Code Style Guidelines
+
+### Naming Conventions
+
+- **Classes**: PascalCase (`PlayerController`, `GameManager`)
+- **Methods**: PascalCase (`Initialize()`, `ProcessInput()`)
+- **Private Fields**: `_camelCase` (`_moveSpeed`, `_targetTransform`)
+- **Static Fields**: `s_camelCase` (`s_instance`, `s_instanceCount`)
+- **Properties**: PascalCase (`MaxHealth`, `IsAlive`)
+- **Constants**: PascalCase (`MaxPlayers`, `GameVersion`)
+- **Interfaces**: `I` + PascalCase (`IInteractable`, `IDamageable`)
+
+### Serialization
+
+- **Always Use**: `[SerializeField]` for private fields exposed in Inspector
+- **Never Use**: Public fields without `[SerializeField]`
+- **Configuration**: Use ScriptableObject for game configs
+
+```csharp
+public class PlayerController : MonoBehaviour
+{
+    [SerializeField] private float _moveSpeed = 5f;
+    [SerializeField] private GameObject _weaponPrefab;
+    
+    public float MoveSpeed => _moveSpeed;
+}
+```
+
+### Module Access Pattern
+
+```csharp
+// In hot update domain (GameLogic)
+public class SomeGameLogic
+{
+    private void DoSomething()
+    {
+        // Use GameModule for hot update domain
+        GameModule.UI.ShowUIAsync<SomeUI>();
+        GameModule.Audio.PlaySound("Click");
+        GameModule.Resource.LoadAssetAsync<GameObject>("Enemy");
+    }
+}
+
+// In main domain (Procedure, etc.)
+public class SomeProcedure : ProcedureBase
+{
+    protected override void OnEnter(IFsm<IProcedureModule> procedureOwner)
+    {
+        // Use ModuleSystem for main domain
+        var resourceModule = ModuleSystem.GetModule<IResourceModule>();
+        var audioModule = ModuleSystem.GetModule<IAudioModule>();
+    }
+}
+```
+
+## Important Rules
+
+### ✅ ALWAYS
+
+- Use **YooAsset** for all resource loading (never `Resources.Load`)
+- Use **LoadAssetAsync** for async resource loading (preferred)
+- Use **UniTask** for async operations (prefer over Coroutines)
+- Use **ModuleSystem** or **GameModule** for module access
+- Use **Procedure** system for game state management
+- Use **UIWindow/UIWidget** for UI implementation
+- Use **RegisterEvent()** and **OnRefresh()** in UI classes
+- Use **PoolManager** for object pooling (demo branch)
+- Use **GameEvent.AddEventListener/Send** for general game events
+- Use **GameEvent.Get<T>()** with IEvent interfaces for type-safe UI events
+- Use **`[SerializeField]`** for Inspector-exposed fields
+- Use **XML documentation** for public APIs
+- Place hot update code in **HotFix/GameLogic/** assembly
+- Use **GameEvent** interfaces for decoupled communication
+- Use **Assembly Definitions** for code organization
+
+### ❌ NEVER
+
+- **Never** use `Resources.Load()` - use YooAsset instead
+- **Never** use `FindObjectOfType()` in Update loops
+- **Never** use magic numbers - use constants or configs
+- **Never** put hot update code outside `HotFix/` directory
+- **Never** use Coroutines - use UniTask instead
+- **Never** use public fields without `[SerializeField]`
+- **Never** access modules directly - use ModuleSystem/GameModule
+- **Never** bypass Procedure system for state management
+- **Never** forget to register events in `RegisterEvent()` method
+
+## Development Workflow
+
+### 1. Adding New UI
+
+1. Create UI class inheriting `UIWindow` or `UIWidget` in `HotFix/GameLogic/UI/`
+2. Create UI prefab in `AssetRaw/UI/`
+3. Use `[Window]` attribute for configuration
+4. Implement `ScriptGenerator()` for component bindings
+5. Override `RegisterEvent()` to register event listeners
+6. Override `OnRefresh()` to reset UI state
+7. Show UI: `GameModule.UI.ShowUIAsync<YourUI>()`
+
+### 2. Adding New Procedure
+
+1. Create Procedure class in `GameScripts/Procedure/`
+2. Inherit from `ProcedureBase`
+3. Override lifecycle methods (`OnEnter`, `OnUpdate`, `OnExit`)
+4. Register in `ProcedureSetting` asset
+
+### 3. Adding New Module (Framework)
+
+1. Create module interface `IModuleName` in `TEngine/Runtime/Module/`
+2. Implement module class `ModuleName` implementing interface
+3. Register in `ModuleSystem`
+4. Access via `ModuleSystem.GetModule<IModuleName>()`
+
+### 4. Adding Hot Update Code
+
+1. Place code in `HotFix/GameLogic/` assembly
+2. Access framework via `GameModule` static class
+3. Call `UIModule.Instance.Active()` in `GameApp.StartGameLogic()` before showing UI
+4. Ensure code compiles to DLL for HybridCLR
+5. Test hot update flow: Launch → LoadAssembly → GameApp.Entrance() → StartGameLogic()
 
 ## Supported Platforms
 
@@ -52,18 +398,18 @@ This project uses Unity 6.2 (LTS 2025) with modern systems and architectural app
 - Android
 - WebGL (limited support)
 
-## Important Rules
+## Performance Considerations
 
-✅ **ALWAYS**:
-- New Input System
-- UI Toolkit
-- Addressables
-- [SerializeField] instead of public
-- XML documentation
+- **Object Pooling**: Use `ObjectPoolModule` for frequently instantiated objects
+- **Memory Pooling**: Use `MemoryPool` for temporary allocations
+- **Resource Management**: YooAsset handles automatic resource release
+- **Async Operations**: Use UniTask for non-blocking operations
+- **Module Lazy Loading**: Modules are loaded on first access
 
-❌ **NEVER**:
-- Legacy Input
-- UGUI for new UI
-- Resources.Load
-- FindObjectOfType in Update
-- Magic numbers
+## Testing
+
+- Use Unity Test Framework for unit tests
+- Place test assemblies in appropriate test directories
+- Test hot update flow in editor and build
+- Test resource loading and release
+- Test UI lifecycle and state management

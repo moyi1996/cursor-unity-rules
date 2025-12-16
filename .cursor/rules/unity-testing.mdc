@@ -91,3 +91,122 @@ public class PlayerMovementTests
     }
 }
 ```
+
+## 4. TEngine Module Testing
+
+When testing TEngine modules, ensure proper initialization:
+
+```
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
+using System.Collections;
+using TEngine;
+using Cysharp.Threading.Tasks;
+
+public class ResourceModuleTests
+{
+    private GameObject _testGameObject;
+
+    [SetUp]
+    public void Setup()
+    {
+        // Initialize TEngine modules if needed
+        _testGameObject = new GameObject("TestGameObject");
+        var gameEntry = _testGameObject.AddComponent<GameEntry>();
+    }
+
+    [TearDown]
+    public void Teardown()
+    {
+        if (_testGameObject != null)
+        {
+            Object.Destroy(_testGameObject);
+        }
+    }
+
+    [UnityTest]
+    public IEnumerator LoadAssetAsync_ValidAsset_LoadsSuccessfully()
+    {
+        // Arrange
+        var resourceModule = ModuleSystem.GetModule<IResourceModule>();
+        Assert.That(resourceModule, Is.Not.Null);
+
+        // Act
+        bool loadComplete = false;
+        AssetHandle handle = null;
+        
+        LoadAssetAsync().Forget();
+        
+        async UniTaskVoid LoadAssetAsync()
+        {
+            handle = await resourceModule.LoadAssetAsync<GameObject>("TestAsset");
+            loadComplete = true;
+        }
+
+        // Wait for async operation
+        float timeout = 10f;
+        float elapsed = 0f;
+        while (!loadComplete && elapsed < timeout)
+        {
+            yield return null;
+            elapsed += Time.deltaTime;
+        }
+
+        // Assert
+        Assert.That(loadComplete, Is.True, "Asset load did not complete in time");
+        Assert.That(handle, Is.Not.Null);
+        Assert.That(handle.AssetObject, Is.Not.Null);
+    }
+}
+```
+
+## 5. UI Module Testing
+
+When testing UI modules in hot update domain:
+
+```
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
+using System.Collections;
+using GameLogic;
+using Cysharp.Threading.Tasks;
+
+public class UIModuleTests
+{
+    [UnityTest]
+    public IEnumerator ShowUIAsync_ValidUI_ShowsSuccessfully()
+    {
+        // Arrange
+        // Ensure GameApp.Entrance() has been called to initialize hot update domain
+        
+        // Act
+        bool showComplete = false;
+        ShowUIAync().Forget();
+        
+        async UniTaskVoid ShowUIAync()
+        {
+            await GameModule.UI.ShowUIAsync<LoginUI>();
+            showComplete = true;
+        }
+
+        // Wait for UI to show
+        float timeout = 5f;
+        float elapsed = 0f;
+        while (!showComplete && elapsed < timeout)
+        {
+            yield return null;
+            elapsed += Time.deltaTime;
+        }
+
+        // Assert
+        Assert.That(showComplete, Is.True);
+        var loginUI = GameModule.UI.GetWindow<LoginUI>();
+        Assert.That(loginUI, Is.Not.Null);
+        
+        // Cleanup
+        GameModule.UI.CloseUI<LoginUI>();
+    }
+}
+```

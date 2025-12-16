@@ -539,12 +539,104 @@ public class InputRebinder : MonoBehaviour
 }
 ```
 
+## TEngine Integration
+
+### Input in Hot Update Domain
+
+When using input in hot update domain (GameLogic), access modules via `GameModule`:
+
+```csharp
+using UnityEngine;
+using UnityEngine.InputSystem;
+using MyGame.Input;
+using TEngine;
+
+namespace GameLogic
+{
+    public class PlayerController : MonoBehaviour
+    {
+        private PlayerInputActions _inputActions;
+        private Vector2 _moveInput;
+
+        private void Awake()
+        {
+            _inputActions = new PlayerInputActions();
+        }
+
+        private void OnEnable()
+        {
+            _inputActions.Gameplay.Enable();
+            _inputActions.Gameplay.Move.performed += OnMove;
+        }
+
+        private void OnDisable()
+        {
+            _inputActions.Gameplay.Move.performed -= OnMove;
+            _inputActions.Gameplay.Disable();
+        }
+
+        private void Update()
+        {
+            _moveInput = _inputActions.Gameplay.Move.ReadValue<Vector2>();
+            ProcessMovement(_moveInput);
+        }
+
+        private void OnMove(InputAction.CallbackContext context)
+        {
+            // Handle move input
+        }
+
+        private void ProcessMovement(Vector2 input)
+        {
+            // Movement logic
+            // Can access TEngine modules via GameModule
+            // GameModule.Audio.PlaySound("Footstep");
+        }
+    }
+}
+```
+
+### Input in Main Domain
+
+When using input in main domain (Procedure, etc.), access modules via `ModuleSystem`:
+
+```csharp
+using UnityEngine;
+using UnityEngine.InputSystem;
+using TEngine;
+
+namespace Procedure
+{
+    public class ProcedureLaunch : ProcedureBase
+    {
+        private PlayerInputActions _inputActions;
+
+        protected override void OnEnter(IFsm<IProcedureModule> procedureOwner)
+        {
+            base.OnEnter(procedureOwner);
+            _inputActions = new PlayerInputActions();
+            _inputActions.UI.Enable();
+        }
+
+        protected override void OnExit(IFsm<IProcedureModule> procedureOwner, bool isShutdown)
+        {
+            if (_inputActions != null)
+            {
+                _inputActions.UI.Disable();
+                _inputActions.Dispose();
+            }
+            base.OnExit(procedureOwner, isShutdown);
+        }
+    }
+}
+```
+
 ## DO's and DON'Ts Summary
 
-### ❌ DON'T
+### ❌ DON'T (For New Code)
 
 ```
-// Legacy Input - FORBIDDEN
+// Legacy Input - FORBIDDEN for new code
 if (Input.GetKey(KeyCode.W))
 {
 }
@@ -559,7 +651,11 @@ float horizontal = Input.GetAxis("Horizontal");
 ### ✅ DO
 
 ```
-// New Input System
+// New Input System (Recommended)
 Vector2 move = _inputActions.Gameplay.Move.ReadValue<Vector2>();
 _inputActions.Gameplay.Jump.performed += OnJump;
+
+// TEngine: Access modules appropriately
+// Hot update domain: GameModule.X
+// Main domain: ModuleSystem.GetModule<T>()
 ```

@@ -1,467 +1,384 @@
 ---
-description: "UI Toolkit (not UGUI)"
-globs: ["**/UI*.cs","**/*.uxml","**/*.uss"]
+description: "UGUI with TEngine UIModule"
+globs: ["**/UI*.cs", "**/*UI.cs", "**/UIWindow*.cs", "**/UIWidget*.cs"]
 alwaysApply: false
 ---
 
-# UI Toolkit Rules (NOT UGUI)
+# UGUI with TEngine UIModule
+
+## Overview
+
+This project uses **UGUI** (Unity UI) with **TEngine UIModule** for UI management. All UI classes inherit from `UIWindow` or `UIWidget` and are managed by the `UIModule`.
 
 ## Project Structure
 
 ```
 Assets/
-├── UI/
-│   ├── Runtime/
-│   │   ├── Controllers/
-│   │   │   └── MainMenuController.cs
-│   │   ├── Views/
-│   │   │   └── MainMenuView.cs
-│   │   ├── ViewModels/
-│   │   │   └── HealthViewModel.cs
-│   │   ├── UXML/
-│   │   │   └── MainMenu.uxml
-│   │   └── USS/
-│   │       └── MainMenu.uss
-│   └── Editor/
-│       └── UIBuilderExtensions.cs
+├── AssetRaw/
+│   └── UI/                    # UI Prefabs
+│       ├── LoginUI.prefab
+│       └── BattleMainUI.prefab
+└── GameScripts/
+    └── HotFix/
+        └── GameLogic/
+            └── UI/            # UI Scripts
+                ├── LoginUI/
+                │   └── LoginUI.cs
+                └── BattleMainUI/
+                    └── BattleMainUI.cs
 ```
 
-## UXML Structure
+## UI Base Classes
 
-```
-<ui:UXML xmlns:ui="UnityEngine.UIElements">
-    <ui:VisualElement name="MainContainer" class="container">
-        <ui:Label text="Health:" class="label" />
-        <ui:ProgressBar name="HealthBar" high-value="100" />
-        <ui:Button name="StartButton" text="Start Game" />
-    </ui:VisualElement>
-</ui:UXML>
-```
+### UIWindow (Fullscreen/Popup Windows)
 
-## USS Styling
+```csharp
+using UnityEngine;
+using UnityEngine.UI;
+using TEngine;
+using GameLogic;
 
-```
-/* Use CSS Variables for reusability */
-:root {
-    --primary-color: rgb(50, 150, 255);
-    --secondary-color: rgb(255, 100, 50);
-    --bar-height: 30px;
-    --label-size: 24px;
-    --container-padding: 20px;
-}
-
-.container {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--container-padding);
-}
-
-.label {
-    font-size: var(--label-size);
-    color: white;
-    -unity-font-style: bold;
-}
-
-#HealthBar {
-    width: 300px;
-    height: var(--bar-height);
-    background-color: var(--primary-color);
-    border-radius: 5px;
-}
-
-#StartButton {
-    width: 200px;
-    height: 50px;
-    background-color: var(--secondary-color);
-    margin-top: 20px;
-}
-
-#StartButton:hover {
-    background-color: rgb(255, 120, 70);
-}
-```
-
-## C# View (Pure UI Logic)
-
-```
-using System;
-using UnityEngine.UIElements;
-
-namespace UI.Runtime.Views
+namespace GameLogic
 {
     /// <summary>
-    /// Pure UI view layer - handles only visual element queries and basic UI operations
+    /// Login UI window.
     /// </summary>
-    public class MainMenuView : IDisposable
+    [Window(UILayer.UI, location: "LoginUI")]
+    public class LoginUI : UIWindow
     {
-        private readonly VisualElement _root;
-        private readonly Button _startButton;
-        private readonly ProgressBar _healthBar;
-        private readonly Label _statusLabel;
+        #region Auto-generated UI Bindings
+        private Button _btnLogin;
+        private InputField _inputUsername;
+        private Text _txtStatus;
         
-        // Events for controller communication
-        public event Action StartButtonClicked;
-        
-        public MainMenuView(VisualElement root)
+        protected override void ScriptGenerator()
         {
-            _root = root ?? throw new ArgumentNullException(nameof(root));
-            
-            // Query UI elements with null checks
-            _startButton = _root.Q<Button>("StartButton");
-            _healthBar = _root.Q<ProgressBar>("HealthBar");
-            _statusLabel = _root.Q<Label>("StatusLabel");
-            
-            ValidateElements();
+            _btnLogin = FindChildComponent<Button>("m_btnLogin");
+            _inputUsername = FindChildComponent<InputField>("m_inputUsername");
+            _txtStatus = FindChildComponent<Text>("m_txtStatus");
+        }
+        #endregion
+
+        protected override void OnCreate()
+        {
+            // UI initialization - called once when UI is created
+            base.OnCreate();
+        }
+
+        protected override void OnShow()
+        {
+            // Called when UI is shown
+            base.OnShow();
             BindEvents();
         }
-        
-        private void ValidateElements()
+
+        protected override void OnRefresh()
         {
-            if (_startButton == null)
-                throw new InvalidOperationException("StartButton not found in UXML");
-            if (_healthBar == null)
-                throw new InvalidOperationException("HealthBar not found in UXML");
+            // Called when UI is shown or refreshed
+            // Use this to reset UI state (e.g., reset score, hide panels)
+            base.OnRefresh();
+            m_textScore.text = "Score : 0";
+            m_goOverView.SetActive(false);
         }
-        
+
+        protected override void RegisterEvent()
+        {
+            // Register UI events - called automatically after OnShow
+            // Use AddUIEvent to listen to game events
+            AddUIEvent<int>(ActorEventDefine.ScoreChange, OnScoreChange);
+            AddUIEvent(ActorEventDefine.GameOver, OnGameOver);
+        }
+
+        protected override void OnUpdate()
+        {
+            // Called every frame while UI is visible
+            base.OnUpdate();
+        }
+
+        protected override void OnHide()
+        {
+            // Called when UI is hidden
+            base.OnHide();
+            UnbindEvents();
+        }
+
+        protected override void OnDestroy()
+        {
+            // Called when UI is destroyed
+            base.OnDestroy();
+        }
+
         private void BindEvents()
         {
-            _startButton.clicked += OnStartButtonClicked;
+            if (_btnLogin != null)
+            {
+                _btnLogin.onClick.AddListener(OnLoginClicked);
+            }
         }
-        
-        private void OnStartButtonClicked()
+
+        private void UnbindEvents()
         {
-            StartButtonClicked?.Invoke();
+            if (_btnLogin != null)
+            {
+                _btnLogin.onClick.RemoveListener(OnLoginClicked);
+            }
         }
-        
-        // Public API for controllers
-        public void SetHealth(float value)
+
+        private void OnLoginClicked()
         {
-            if (_healthBar != null)
-                _healthBar.value = value;
-        }
-        
-        public void SetStatusText(string text)
-        {
-            if (_statusLabel != null)
-                _statusLabel.text = text;
-        }
-        
-        public void SetInteractable(bool interactable)
-        {
-            if (_startButton != null)
-                _startButton.SetEnabled(interactable);
-        }
-        
-        public void Show()
-        {
-            _root.style.display = DisplayStyle.Flex;
-        }
-        
-        public void Hide()
-        {
-            _root.style.display = DisplayStyle.None;
-        }
-        
-        public void Dispose()
-        {
-            if (_startButton != null)
-                _startButton.clicked -= OnStartButtonClicked;
+            string username = _inputUsername?.text ?? "";
+            // Handle login logic
+            GameModule.UI.CloseUI<LoginUI>();
         }
     }
 }
 ```
 
-## C# Controller (Business Logic)
+### UIWidget (Reusable Components)
 
-```
+```csharp
 using UnityEngine;
-using UnityEngine.UIElements;
-using UI.Runtime.Views;
+using UnityEngine.UI;
+using GameLogic;
 
-namespace UI.Runtime.Controllers
+namespace GameLogic
 {
     /// <summary>
-    /// Controller that manages MainMenuView and coordinates with game systems
+    /// Health bar widget.
     /// </summary>
-    [RequireComponent(typeof(UIDocument))]
-    public class MainMenuController : MonoBehaviour
+    public class HealthBarWidget : UIWidget
     {
-        [SerializeField] private UIDocument uiDocument;
-        
-        private MainMenuView _view;
-        private float _currentHealth = 100f;
-        
-        private void Awake()
+        private Slider _sliderHealth;
+        private Text _txtHealth;
+
+        protected override void ScriptGenerator()
         {
-            if (uiDocument == null)
-                uiDocument = GetComponent<UIDocument>();
-            
-            InitializeView();
+            _sliderHealth = FindChildComponent<Slider>("m_sliderHealth");
+            _txtHealth = FindChildComponent<Text>("m_txtHealth");
         }
-        
-        private void InitializeView()
+
+        public void SetHealth(float current, float max)
         {
-            var root = uiDocument.rootVisualElement;
-            _view = new MainMenuView(root);
-            
-            // Subscribe to view events
-            _view.StartButtonClicked += HandleStartGame;
-            
-            // Initialize UI state
-            _view.SetHealth(_currentHealth);
-            _view.SetStatusText("Ready to start");
-        }
-        
-        private void HandleStartGame()
-        {
-            Debug.Log("Starting game...");
-            _view.SetInteractable(false);
-            _view.SetStatusText("Loading...");
-            
-            // Trigger game start logic
-            GameManager.Instance?.StartGame();
-        }
-        
-        public void UpdateHealth(float newHealth)
-        {
-            _currentHealth = Mathf.Clamp(newHealth, 0f, 100f);
-            _view?.SetHealth(_currentHealth);
-        }
-        
-        private void OnDestroy()
-        {
-            // Critical: Always dispose to prevent memory leaks
-            if (_view != null)
+            if (_sliderHealth != null)
             {
-                _view.StartButtonClicked -= HandleStartGame;
-                _view.Dispose();
+                _sliderHealth.value = current / max;
+            }
+            
+            if (_txtHealth != null)
+            {
+                _txtHealth.text = $"{current:F0}/{max:F0}";
             }
         }
     }
 }
 ```
 
-## Advanced: Data Binding (Unity 6+)
+## Window Attribute
 
+Use `[Window]` attribute to configure UI window:
+
+```csharp
+[Window(
+    UILayer.UI,                    // Window layer (Bottom, UI, Top, Tips, System)
+    location: "LoginUI",           // Asset name (optional, defaults to class name)
+    fullScreen: false,              // Fullscreen window (optional)
+    hideTimeToClose: 10             // Auto-close after hide time in seconds (optional)
+)]
+public class LoginUI : UIWindow { }
 ```
-using UnityEngine;
-using UnityEngine.UIElements;
 
-namespace UI.Runtime.ViewModels
+### UI Layers
+
+```csharp
+public enum UILayer : int
 {
-    /// <summary>
-    /// ViewModel using Unity 6 Data Binding system (MVVM pattern)
-    /// </summary>
-    [UxmlElement]
-    public partial class HealthViewModel : BindableElement
-    {
-        private float _health = 100f;
-        
-        [UxmlAttribute]
-        public float Health
-        {
-            get => _health;
-            set
-            {
-                if (Mathf.Approximately(_health, value))
-                    return;
-                    
-                _health = Mathf.Clamp(value, 0f, 100f);
-                
-                // Notify UI about changes
-                NotifyPropertyChanged(nameof(Health));
-                UpdateVisuals();
-            }
-        }
-        
-        private void UpdateVisuals()
-        {
-            // Update progress bar or other visual elements
-            var progressBar = this.Q<ProgressBar>();
-            if (progressBar != null)
-                progressBar.value = _health;
-        }
-    }
+    Bottom = 0,    // Background UI
+    UI = 1,         // Normal UI
+    Top = 2,        // Top layer UI
+    Tips = 3,       // Tips/Notifications
+    System = 4,    // System UI
 }
 ```
 
-## Performance Optimization
+## UI Management
 
-### Usage Hints for Dynamic Elements
+### Showing UI
 
+```csharp
+// Show UI asynchronously (preferred)
+GameModule.UI.ShowUIAsync<LoginUI>();
+
+// Show UI with user data
+GameModule.UI.ShowUIAsync<LoginUI>(userData1, userData2);
+
+// Show UI synchronously (use sparingly)
+GameModule.UI.ShowUI<LoginUI>();
+
+// Show UI and wait for it to load
+var loginUI = await GameModule.UI.ShowUIAwait<LoginUI>();
 ```
-using UnityEngine;
-using UnityEngine.UIElements;
 
-namespace UI.Runtime.Controllers
+### Closing/Hiding UI
+
+```csharp
+// Close UI (destroys the UI)
+GameModule.UI.CloseUI<LoginUI>();
+
+// Hide UI (keeps UI in memory)
+GameModule.UI.HideUI<LoginUI>();
+```
+
+### Accessing UI Instance
+
+```csharp
+// Get UI instance if it exists
+var loginUI = GameModule.UI.GetWindow<LoginUI>();
+if (loginUI != null)
 {
-    public class PerformanceOptimizedUI : MonoBehaviour
-    {
-        private void Start()
-        {
-            var root = GetComponent<UIDocument>().rootVisualElement;
-            
-            // Dynamic elements (frequently updated/moved)
-            var healthBar = root.Q<ProgressBar>("HealthBar");
-            if (healthBar != null)
-                healthBar.usageHints = UsageHints.DynamicTransform;
-            
-            // Static elements (rarely change)
-            var background = root.Q<VisualElement>("Background");
-            if (background != null)
-                background.usageHints = UsageHints.GroupTransform;
-            
-            // Elements with dynamic colors/styles
-            var damageIndicator = root.Q<VisualElement>("DamageFlash");
-            if (damageIndicator != null)
-                damageIndicator.usageHints = UsageHints.DynamicColor;
-        }
-    }
+    // UI is already open
 }
 ```
 
-### Vertex Buffer Optimization
+## UI Component Binding
 
-```
-using UnityEngine;
-using UnityEngine.UIElements;
+### Auto-Generated Bindings
 
-namespace UI.Runtime.Controllers
+The framework provides auto-generated UI component bindings via `ScriptGenerator()` method:
+
+```csharp
+protected override void ScriptGenerator()
 {
-    public class UISetup : MonoBehaviour
-    {
-        [SerializeField] private PanelSettings panelSettings;
-        
-        private void Awake()
-        {
-            if (panelSettings != null)
-            {
-                // Increase vertex buffer size for complex UI
-                // Default is 64K vertices
-                panelSettings.dynamicAtlasSettings.maxAtlasSize = 2048;
-            }
-        }
-    }
+    // Find components by path
+    _btnLogin = FindChildComponent<Button>("m_btnLogin");
+    _inputField = FindChildComponent<InputField>("m_inputUsername");
+    
+    // Find GameObjects
+    _panelMain = FindChild("m_panelMain").gameObject;
+    
+    // Find by type (if unique)
+    _canvas = GetComponent<Canvas>();
 }
 ```
 
-## World Space UI (Unity 6.2+)
+### Helper Methods
+
+```csharp
+// Find child component by path
+T FindChildComponent<T>(string path) where T : Component;
+
+// Find child GameObject by path
+Transform FindChild(string path);
+
+// Get component on this GameObject
+T GetComponent<T>();
+
+// Get component in children
+T GetComponentInChildren<T>();
+
+// Get component in parent
+T GetComponentInParent<T>();
+```
+
+## UI Lifecycle
 
 ```
-using UnityEngine;
-using UnityEngine.UIElements;
+OnCreate()     → Called once when UI is created
+    ↓
+OnShow()       → Called when UI is shown
+    ↓
+RegisterEvent() → Called after OnShow to register event listeners
+    ↓
+OnRefresh()    → Called after RegisterEvent to reset UI state
+    ↓
+OnUpdate()     → Called every frame while visible
+    ↓
+OnHide()       → Called when UI is hidden
+    ↓
+OnDestroy()    → Called when UI is destroyed
+```
 
-namespace UI.Runtime.Controllers
+### Event Registration
+
+```csharp
+protected override void RegisterEvent()
 {
-    /// <summary>
-    /// Setup for 3D World Space UI using UI Toolkit
-    /// </summary>
-    public class WorldSpaceUIController : MonoBehaviour
-    {
-        [SerializeField] private UIDocument uiDocument;
-        [SerializeField] private RenderTexture targetTexture;
-        
-        private void Awake()
-        {
-            SetupWorldSpaceUI();
-        }
-        
-        private void SetupWorldSpaceUI()
-        {
-            var panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
-            
-            // Configure for world space rendering
-            panelSettings.targetDisplay = 0;
-            panelSettings.renderMode = PanelRenderMode.WorldSpace;
-            panelSettings.targetTexture = targetTexture;
-            panelSettings.scale = 1f;
-            
-            // Apply to UIDocument
-            uiDocument.panelSettings = panelSettings;
-            
-            // Position in 3D space
-            transform.position = new Vector3(0, 2, 5);
-            transform.rotation = Quaternion.Euler(0, 180, 0);
-        }
-    }
+    // Register event listeners using AddUIEvent
+    // Events are automatically unregistered when UI is hidden/destroyed
+    
+    // Event with no parameters
+    AddUIEvent(ActorEventDefine.GameOver, OnGameOver);
+    
+    // Event with one parameter
+    AddUIEvent<int>(ActorEventDefine.ScoreChange, OnScoreChange);
+    
+    // Event with multiple parameters
+    AddUIEvent<Vector3, Quaternion>(ActorEventDefine.PlayerDead, OnPlayerDead);
+}
+
+private void OnScoreChange(int score)
+{
+    m_textScore.text = $"Score : {score}";
+}
+
+private void OnGameOver()
+{
+    m_goOverView.SetActive(true);
 }
 ```
 
-## Visibility Management
+## Event System Integration
 
-```
-using UnityEngine.UIElements;
+### Using Event Interfaces
 
-namespace UI.Runtime.Views
+```csharp
+// Define event interface
+public interface ILoginUI : IEvent
 {
-    public static class UIVisibilityExtensions
+    void ShowLoginUI();
+}
+
+// Implement in UI class
+public class LoginUI : UIWindow, ILoginUI
+{
+    public void ShowLoginUI()
     {
-        /// <summary>
-        /// Completely removes element from layout and rendering
-        /// Use for performance when element is not needed
-        /// </summary>
-        public static void HideCompletely(this VisualElement element)
-        {
-            element.style.display = DisplayStyle.None;
-        }
-        
-        /// <summary>
-        /// Hides element but preserves layout space
-        /// Use for animations or when maintaining layout structure
-        /// </summary>
-        public static void HideButKeepSpace(this VisualElement element)
-        {
-            element.style.visibility = Visibility.Hidden;
-        }
-        
-        /// <summary>
-        /// Makes element transparent but still renders
-        /// Use for fade-out animations
-        /// </summary>
-        public static void MakeTransparent(this VisualElement element)
-        {
-            element.style.opacity = 0;
-        }
-        
-        /// <summary>
-        /// Shows element that was hidden
-        /// </summary>
-        public static void ShowElement(this VisualElement element)
-        {
-            element.style.display = DisplayStyle.Flex;
-            element.style.visibility = Visibility.Visible;
-            element.style.opacity = 1;
-        }
+        GameModule.UI.ShowUIAsync<LoginUI>();
     }
 }
+
+// Access from anywhere
+GameEvent.Get<ILoginUI>().ShowLoginUI();
 ```
 
-## Best Practices Checklist
+## Best Practices
 
-### Memory Management
-- ✅ Always unsubscribe from events in `OnDestroy()` or `Dispose()`
-- ✅ Use `null` checks after `Q<T>()` queries
-- ✅ Dispose of views when controllers are destroyed
-- ✅ Clear event handlers before reassigning UI elements
+### ✅ DO
 
-### Performance
-- ✅ Set appropriate `UsageHints` for dynamic elements
-- ✅ Use CSS variables for style reusability
-- ✅ Minimize DOM queries - cache references in `Awake()`
-- ✅ Batch UI updates when possible
-- ✅ Use `display: none` for hidden elements to save rendering cost
+- Inherit from `UIWindow` or `UIWidget`
+- Use `[Window]` attribute for configuration
+- Place UI scripts in `HotFix/GameLogic/UI/`
+- Place UI prefabs in `AssetRaw/UI/`
+- Use `ScriptGenerator()` for component bindings
+- Use `RegisterEvent()` to register event listeners
+- Use `OnRefresh()` to reset UI state when shown
+- Use `AddUIEvent` in `RegisterEvent()` for event handling
+- Unbind events in `OnHide()` or `OnDestroy()` (automatic for AddUIEvent)
+- Use `GameModule.UI` for UI management
+- Use async methods (`ShowUIAsync`) when possible
 
-### Architecture
-- ✅ Separate View (UI logic) from Controller (business logic)
-- ✅ Use events for View-to-Controller communication
-- ✅ Keep Views stateless - Controllers manage state
-- ✅ Use ViewModels with Data Binding for complex UIs
-- ✅ Structure folders by feature: `Controllers/`, `Views/`, `UXML/`, `USS/`
+### ❌ DON'T
 
-### Code Quality
-- ✅ Use meaningful names following Microsoft C# conventions
-- ✅ Private fields use `_camelCase` prefix
-- ✅ Add XML documentation comments for public APIs
-- ✅ Validate UI elements in constructor/Awake
-- ✅ Handle edge cases (null elements, invalid values)
+- Don't use `GameObject.Find()` or `Transform.Find()` in Update
+- Don't create UI manually with `Instantiate()` - use `GameModule.UI`
+- Don't access UI components without null checks
+- Don't forget to unbind events
+- Don't put UI code in main domain (use hot update domain)
+- Don't use `Resources.Load()` for UI prefabs (use YooAsset via framework)
+
+## Performance Tips
+
+- UI components are cached in `ScriptGenerator()` - don't query repeatedly
+- Use `OnUpdate()` sparingly - only when needed
+- Hide UI instead of closing if it will be shown again soon
+- Use object pooling for frequently created/destroyed UI elements
+- Batch UI updates when possible
